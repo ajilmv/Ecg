@@ -5,27 +5,31 @@ module max30003_driver (
     input  wire clk,
     input  wire rst,
 
-    // SPI pins
+    ////////////////////////////////////////////////////////////
+    // SPI pins to MAX30003
+    ////////////////////////////////////////////////////////////
     output wire sclk,
     output wire mosi,
     input  wire miso,
     output wire cs,
 
+    ////////////////////////////////////////////////////////////
     // Control
+    ////////////////////////////////////////////////////////////
     input  wire start_init,
-    input  wire start_read,
 
+    ////////////////////////////////////////////////////////////
     // Outputs
+    ////////////////////////////////////////////////////////////
     output reg [23:0] ecg_sample,
     output reg [15:0] heart_rate,
     output reg [15:0] rr_interval,
     output reg init_done
-
 );
 
-////////////////////////////////////////////////////////////
-// SPI Instance
-////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////
+// SPI MASTER INSTANCE
+//////////////////////////////////////////////////////////////
 
 reg        spi_start;
 reg [31:0] spi_tx;
@@ -45,142 +49,222 @@ spi_master SPI0 (
     .cs(cs)
 );
 
-////////////////////////////////////////////////////////////
-// Delay Counter (replaces delay())
-////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////
+// DELAY COUNTER (for initialization timing)
+//////////////////////////////////////////////////////////////
 
-reg [23:0] delay_cnt;
-reg delay_done;
+reg [27:0] delay_cnt;
+wire delay_done = (delay_cnt == 0);
 
-always @(posedge clk) begin
-    if (delay_cnt == 24'd5_000_000) begin
-        delay_done <= 1;
-        delay_cnt <= 0;
-    end
-    else begin
-        delay_cnt <= delay_cnt + 1;
-        delay_done <= 0;
-    end
+always @(posedge clk)
+begin
+    if (delay_cnt != 0)
+        delay_cnt <= delay_cnt - 1;
 end
 
-////////////////////////////////////////////////////////////
-// Initialization FSM  (Converted begin())
-////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////
+// FSM STATE DEFINITIONS
+//////////////////////////////////////////////////////////////
 
-localparam IDLE  = 0;
-localparam RESET = 1;
-localparam GEN   = 2;
-localparam CAL   = 3;
-localparam EMUX  = 4;
-localparam ECG   = 5;
-localparam RTOR1 = 6;
-localparam SYNC  = 7;
-localparam DONE  = 8;
+localparam IDLE      = 0;
+localparam RESET     = 1;
+localparam WAIT1     = 2;
+localparam GEN       = 3;
+localparam WAIT2     = 4;
+localparam CAL       = 5;
+localparam WAIT3     = 6;
+localparam EMUX      = 7;
+localparam WAIT4     = 8;
+localparam ECG_CFG   = 9;
+localparam WAIT5     = 10;
+localparam RTOR1     = 11;
+localparam SYNC      = 12;
+localparam INIT_DONE = 13;
 
-reg [3:0] state;
+//////////////////////////////////////////////////////////////
+// RUN STATES (continuous acquisition)
+//////////////////////////////////////////////////////////////
 
-always @(posedge clk or posedge rst) begin
-    if (rst) begin
-        state <= IDLE;
-        init_done <= 0;
-        spi_start <= 0;
-    end
-    else begin
-        case(state)
+localparam READ_ECG_START = 14;
+localparam READ_ECG_WAIT  = 15;
+localparam READ_ECG_STORE = 16;
 
-        IDLE:
-            if (start_init)
-                state <= RESET;
+reg [4:0] state;
 
-        RESET: begin
-            spi_tx <= {REG_SW_RST, 24'h000000};
-            spi_start <= 1;
-            if (spi_done) state <= GEN;
-        end
+//////////////////////////////////////////////////////////////
+// MAIN FSM
+//////////////////////////////////////////////////////////////
 
-        GEN: begin
-            spi_tx <= {REG_CNFG_GEN, 24'h081007};
-            spi_start <= 1;
-            if (spi_done) state <= CAL;
-        end
-
-        CAL: begin
-            spi_tx <= {REG_CNFG_CAL, 24'h720000};
-            spi_start <= 1;
-            if (spi_done) state <= EMUX;
-        end
-
-        EMUX: begin
-            spi_tx <= {REG_CNFG_EMUX, 24'h0B0000};
-            spi_start <= 1;
-            if (spi_done) state <= ECG;
-        end
-
-        ECG: begin
-            spi_tx <= {REG_CNFG_ECG, 24'h805000};
-            spi_start <= 1;
-            if (spi_done) state <= RTOR1;
-        end
-
-        RTOR1: begin
-            spi_tx <= {REG_CNFG_RTOR1, 24'h3FC600};
-            spi_start <= 1;
-            if (spi_done) state <= SYNC;
-        end
-
-        SYNC: begin
-            spi_tx <= {REG_SYNCH, 24'h000000};
-            spi_start <= 1;
-            if (spi_done) state <= DONE;
-        end
-
-        DONE: begin
-            init_done <= 1;
-            state <= IDLE;
-        end
-
-        endcase
-    end
+always @(posedge clk or posedge rst)
+begin
+if (rst)
+begin
+    state      <= IDLE;
+    spi_start  <= 0;
+    init_done  <= 0;
 end
+else
+begin
 
-////////////////////////////////////////////////////////////
-// ECG Sample Read  (readEcgSample)
-////////////////////////////////////////////////////////////
+    spi_start <= 0;   // default low
 
-always @(posedge clk) begin
-    if (start_read) begin
-        spi_tx <= {REG_ECG_FIFO, 24'hFFFFFF};
+    case(state)
+
+    //////////////////////////////////////////////////////////
+    // IDLE
+    //////////////////////////////////////////////////////////
+    IDLE:
+        if (start_init)
+            state <= RESET;
+
+    //////////////////////////////////////////////////////////
+    // RESET DEVICE
+    //////////////////////////////////////////////////////////
+    RESET:
+    begin
+        spi_tx    <= {REG_SW_RST, 24'h000000};
         spi_start <= 1;
+
+        if (spi_done)
+        begin
+            delay_cnt <= 28'd10_000_000; // 100 ms
+            state <= WAIT1;
+        end
     end
 
-    if (spi_done) begin
+    WAIT1:
+        if (delay_done)
+            state <= GEN;
+
+    //////////////////////////////////////////////////////////
+    // CONFIGURATION SEQUENCE
+    //////////////////////////////////////////////////////////
+
+    GEN:
+    begin
+        spi_tx    <= {REG_CNFG_GEN, 24'h081007};
+        spi_start <= 1;
+
+        if (spi_done)
+        begin
+            delay_cnt <= 28'd5_000_000;
+            state <= WAIT2;
+        end
+    end
+
+    WAIT2:
+        if (delay_done)
+            state <= CAL;
+
+    CAL:
+    begin
+        spi_tx    <= {REG_CNFG_CAL, 24'h720000};
+        spi_start <= 1;
+
+        if (spi_done)
+        begin
+            delay_cnt <= 28'd5_000_000;
+            state <= WAIT3;
+        end
+    end
+
+    WAIT3:
+        if (delay_done)
+            state <= EMUX;
+
+    EMUX:
+    begin
+        spi_tx    <= {REG_CNFG_EMUX, 24'h0B0000};
+        spi_start <= 1;
+
+        if (spi_done)
+        begin
+            delay_cnt <= 28'd5_000_000;
+            state <= WAIT4;
+        end
+    end
+
+    WAIT4:
+        if (delay_done)
+            state <= ECG_CFG;
+
+    ECG_CFG:
+    begin
+        spi_tx    <= {REG_CNFG_ECG, 24'h805000};
+        spi_start <= 1;
+
+        if (spi_done)
+        begin
+            delay_cnt <= 28'd5_000_000;
+            state <= WAIT5;
+        end
+    end
+
+    WAIT5:
+        if (delay_done)
+            state <= RTOR1;
+
+    RTOR1:
+    begin
+        spi_tx    <= {REG_CNFG_RTOR1, 24'h3FC600};
+        spi_start <= 1;
+
+        if (spi_done)
+            state <= SYNC;
+    end
+
+    SYNC:
+    begin
+        spi_tx    <= {REG_SYNCH, 24'h000000};
+        spi_start <= 1;
+
+        if (spi_done)
+            state <= INIT_DONE;
+    end
+
+    //////////////////////////////////////////////////////////
+    // INIT COMPLETE → START ACQUISITION
+    //////////////////////////////////////////////////////////
+
+    INIT_DONE:
+    begin
+        init_done <= 1;
+        state <= READ_ECG_START;
+    end
+
+    //////////////////////////////////////////////////////////
+    // CONTINUOUS ECG SAMPLING LOOP
+    //////////////////////////////////////////////////////////
+
+    READ_ECG_START:
+    begin
+        spi_tx    <= {REG_ECG_FIFO, 24'hFFFFFF};
+        spi_start <= 1;
+        state <= READ_ECG_WAIT;
+    end
+
+    READ_ECG_WAIT:
+        if (spi_done)
+            state <= READ_ECG_STORE;
+
+    READ_ECG_STORE:
+    begin
         ecg_sample <= spi_rx[23:0];
+
+        // Optional simple HR placeholder
+        heart_rate <= heart_rate;
+        rr_interval <= rr_interval;
+
+        state <= READ_ECG_START; // loop forever
     end
+
+    //////////////////////////////////////////////////////////
+
+    default:
+        state <= IDLE;
+
+    endcase
 end
-
-////////////////////////////////////////////////////////////
-// Heart Rate Calculation  (updateHeartRate)
-////////////////////////////////////////////////////////////
-
-reg [15:0] rtor;
-
-always @(posedge clk) begin
-
-    if (start_read) begin
-        spi_tx <= {REG_RTOR, 24'hFFFFFF};
-        spi_start <= 1;
-    end
-
-    if (spi_done) begin
-
-        rtor <= (spi_rx[23:8] >> 2) & 16'h3FFF;
-
-        if (rtor != 0) begin
-            heart_rate <= 16'd7680 / rtor;
-            rr_interval <= rtor * 8;
-        end
-    end
-
 end
 
 endmodule
