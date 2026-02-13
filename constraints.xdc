@@ -5,30 +5,20 @@ set_property -dict { PACKAGE_PIN E3 IOSTANDARD LVCMOS33 } [get_ports clk]
 create_clock -period 10.00 -name sys_clk [get_ports clk]
 
 ############################################
-## MAX30003 SPI — PMOD JA
+## MAX30003 SPI - PMOD JA
 ############################################
 
-# MISO
-set_property PACKAGE_PIN C17 IOSTANDARD LVCMOS33 [get_ports spi_miso]
+set_property -dict { PACKAGE_PIN C17 IOSTANDARD LVCMOS33 } [get_ports spi_miso]
+set_property -dict { PACKAGE_PIN D18 IOSTANDARD LVCMOS33 } [get_ports spi_mosi]
+set_property -dict { PACKAGE_PIN E18 IOSTANDARD LVCMOS33 } [get_ports spi_sclk]
+set_property -dict { PACKAGE_PIN G17 IOSTANDARD LVCMOS33 } [get_ports spi_cs]
 
-# MOSI
-set_property PACKAGE_PIN D18 IOSTANDARD LVCMOS33 [get_ports spi_mosi]
-
-# SCLK
-set_property PACKAGE_PIN E18 IOSTANDARD LVCMOS33 [get_ports spi_sclk]
-
-# CS
-set_property PACKAGE_PIN G17 IOSTANDARD LVCMOS33 [get_ports spi_cs]
-
-# INT1 (optional)
-set_property PACKAGE_PIN D17 IOSTANDARD LVCMOS33 [get_ports ecg_int]
+# Interrupt (optional)
+set_property -dict { PACKAGE_PIN D17 IOSTANDARD LVCMOS33 } [get_ports ecg_int]
 
 ############################################
-## UART (USB to PC)
+## UART
 ############################################
 
-# FPGA → PC
-set_property PACKAGE_PIN D4 IOSTANDARD LVCMOS33 [get_ports uart_tx]
-
-# PC → FPGA (optional)
-set_property PACKAGE_PIN C4 IOSTANDARD LVCMOS33 [get_ports uart_rx]
+set_property -dict { PACKAGE_PIN D4 IOSTANDARD LVCMOS33 } [get_ports uart_tx]
+set_property -dict { PACKAGE_PIN C4 IOSTANDARD LVCMOS33 } [get_ports uart_rx]
