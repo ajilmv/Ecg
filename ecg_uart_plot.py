@@ -1,56 +1,76 @@
+import sys
+sys.path.append(r"C:\Users\User\AppData\Roaming\Python\Python39\site-packages")
+
 import serial
-import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
 
-# ---------------- UART SETTINGS ----------------
+# --------------------------------------------------
+# UART SETTINGS
+# --------------------------------------------------
 
-PORT = "COM3"        # 🔴 Change this (Linux: /dev/ttyUSB0)
+PORT = "COM4"        # Change if needed
 BAUD = 115200
 
 ser = serial.Serial(PORT, BAUD, timeout=1)
+ser.reset_input_buffer()
 
-print("Reading ECG data... Press Ctrl+C to stop")
+print("Streaming ECG... Press Ctrl+C to stop")
 
-# ---------------- BUFFER ----------------
+# --------------------------------------------------
+# BUFFER SETTINGS
+# --------------------------------------------------
 
 BUFFER_SIZE = 500
 ecg_buffer = deque([0]*BUFFER_SIZE, maxlen=BUFFER_SIZE)
 
-# ---------------- PLOT SETUP ----------------
+# --------------------------------------------------
+# REALTIME PLOT SETUP
+# --------------------------------------------------
 
-plt.ion()   # interactive mode
+plt.ion()
 
 fig, ax = plt.subplots()
-line, = ax.plot(ecg_buffer)
+line, = ax.plot(ecg_buffer, linewidth=1)
 
-ax.set_ylim(-500000, 500000)
-ax.set_title("Real-Time ECG")
+ax.set_title("Real-Time ECG Waveform")
 ax.set_xlabel("Samples")
 ax.set_ylabel("Amplitude")
 
-# ---------------- READ LOOP ----------------
+# Adjust scale as tuned
+ax.set_ylim(-100000, 100000)
+
+plt.show(block=False)
+
+# --------------------------------------------------
+# DATA READ + PLOT LOOP
+# --------------------------------------------------
 
 try:
-while True:
+    while True:
 
-```
-    data = ser.read(4)   # 32-bit sample
+        # Read 32-bit ECG sample from UART
+        data = ser.read(4)
 
-    if len(data) == 4:
+        if len(data) == 4:
 
-        # Convert bytes → signed int
-        sample = int.from_bytes(data, byteorder='big', signed=True)
+            sample = int.from_bytes(
+                data,
+                byteorder='big',
+                signed=True
+            )
 
-        ecg_buffer.append(sample)
+            ecg_buffer.append(sample)
 
-        # Update plot
-        line.set_ydata(ecg_buffer)
-        plt.pause(0.001)
-```
+            # Update plot
+            line.set_ydata(ecg_buffer)
+            line.set_xdata(range(len(ecg_buffer)))
+
+            fig.canvas.draw()
+            fig.canvas.flush_events()
 
 except KeyboardInterrupt:
-print("\nStopped by user")
+    print("Stopped by user")
 
 finally:
-ser.close()
+    ser.close()
